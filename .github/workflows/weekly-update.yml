@@ -1,0 +1,54 @@
+name: Weekly incident update
+
+on:
+  schedule:
+    - cron: "0 13 * * 1"   # Mondays 13:00 UTC = 6:00 a.m. Arizona time
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "weekly, backfill, or manual"
+        default: "weekly"
+      since:
+        description: "Window start (YYYY-MM-DD), optional"
+        default: ""
+      limit:
+        description: "Backfill: max records per run (0 = all)"
+        default: "10"
+      dry_run:
+        description: "true = no database writes"
+        default: "false"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: tracker-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Run pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          RESEARCH_MODEL: ${{ vars.RESEARCH_MODEL || 'claude-sonnet-5' }}
+          VERIFY_MODEL: ${{ vars.VERIFY_MODEL || 'claude-opus-5-5' }}
+          AUTO_PUBLISH: ${{ vars.AUTO_PUBLISH || 'false' }}
+          AUTO_PUBLISH_TIERS: ${{ vars.AUTO_PUBLISH_TIERS || 'T1,T2' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ARGS="--mode ${{ github.event.inputs.mode || 'weekly' }}"
+          if [ -n "${{ github.event.inputs.since }}" ]; then ARGS="$ARGS --since ${{ github.event.inputs.since }}"; fi
+          if [ "${{ github.event.inputs.mode }}" = "backfill" ]; then ARGS="$ARGS --limit ${{ github.event.inputs.limit || '10' }}"; fi
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          python pipeline/run.py $ARGS
